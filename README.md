@@ -1,6 +1,6 @@
 # Time-Series-Forecasting
 
-Preprocess the data (e.g. cleaning, dealing with missing data, transformation of categorical variables) in R. Forcast the number of website visits to Wikipedia for the topic Bill Gates for the next month.
+Preprocess the data (e.g. cleaning, filtering, dealing with missing data, transformation into time series) in R. Forcast the number of website visits to Wikipedia for the topic Bill Gates for the next month. Selected bottoms-up hierarchical model due to the better accruacy on the test set.
 
 Methods used:
 - Non-seasonal arima
