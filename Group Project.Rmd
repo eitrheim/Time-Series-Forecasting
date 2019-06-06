@@ -1,9 +1,7 @@
 ---
 title: "Time Series Group Project"
 author: "Ann Eitrheim, Alvin Haryanto, Dan Tallarico"
-output:
-  html_notebook:
-    code_folding: none
+output: rmarkdown::github_document
 ---
 
 https://www.kaggle.com/c/web-traffic-time-series-forecasting/data
