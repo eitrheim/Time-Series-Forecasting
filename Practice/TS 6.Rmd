@@ -1,0 +1,200 @@
+---
+title: "Assignment 6"
+author: "Ann Eitrheim"
+output:
+  html_notebook:
+    code_folding: none
+---
+####Loading the data
+Input gas rate (independent variable) 
+Output gas CO2 % (dependent variable that needs to be forecast)
+```{r}
+setwd("~/Documents/Time_Series_Analysis/Assignment_6")
+df <- read.csv("Gas Furnace Dataset.csv")
+head(df)
+plot(df)
+ts.plot(df, col = c(1,2))
+legend("center",legend=c("Outlet Gas CO2 Percentage","Input Gas Rate"), text.col = c(2,1))
+```
+
+The R function arma.innovation() to use for adjusting the gas rate and CO2% given an ARMA model.
+```{r}
+arma.innovation <- function(x, arma.model, ar.truncation=10) {
+  p <- arma.model$arma[1]
+  q <- arma.model$arma[2]
+  ar.coef <- arma.model$coef[seq_len(p)]
+  ma.coef <- arma.model$coef[p + seq_len(q)]
+  if (q == 0) {
+    infinite.ar.coef <- ar.coef
+  } else {
+    infinite.ar.coef <- -ARMAtoMA(-ma.coef, -ar.coef, ar.truncation)
+  }
+  return(as.vector(filter(x, c(1, -infinite.ar.coef), side=1)))
+}
+```
+
+```{r, include=FALSE}
+# >filter(1:5, f1, method="recursive")
+# [1]  1  3  6 10 15
+# 
+# equivalent to:
+# 
+# x[1]
+# x[2] + f1*x[1]
+# x[3] + f1*x[2] + f1^2*x[1]
+# x[4] + f1*x[3] + f1^2*x[2] + f1^3*x[1]
+# x[5] + f1*x[4] + f1^2*x[3] + f1^3*x[2] + f1^4*x[1]
+
+
+# > filter(1:5, c(f1,f2), method="recursive")
+# Time Series:
+# Start = 1 
+# End = 5 
+# Frequency = 1 
+# [1]  1  3  7 14 26
+# > y1 <- x[1]                                            
+# > y2 <- x[2] + f1*y1      
+# > y3 <- x[3] + f1*y2 + f2*y1
+# > y4 <- x[4] + f1*y3 + f2*y2
+# > y5 <- x[5] + f1*y4 + f2*y3
+# > c(y1,y2,y3,y4,y5)
+# [1]  1  3  7 14 26
+
+```
+
+#1
+Use linear regression model - plot the ACF - what can you conclude?
+```{r}
+linearmodel <- lm(df$Outlet.gas.CO2.percentage ~ df$Input.gas.rate)
+par(mfrow=c(1,2))
+acf(linearmodel$residuals,length(df[,1]),main='')
+ts.plot(linearmodel$residuals)
+```
+We can see that the residuals of the model have autocorrelation.
+
+#2
+Use ARIMA (0,0,1) model for the residuals. Adjust the Input gas rate and Output CO2 % with the MA coefficient. Combine with the linear regression model. Plot the residuals.
+```{r}
+library(forecast)
+residualarima001 <- Arima(linearmodel$residuals, order = c(0,0,1))
+df2 <- arma.innovation(df, residualarima001)
+df2 <- as.data.frame(matrix(df2, ncol = 2))
+linearmodel2 <- lm(df2[,2] ~ df2[,1])
+par(mfrow=c(1,2))
+acf(linearmodel2$residuals,length(df2[,1]),main='')
+ts.plot(linearmodel2$residuals)
+```
+
+#3
+Use ARIMA (1,0,0) model for the residuals. Adjust the Input gas rate and Output CO2 % with the AR coefficient. Combine with the linear regression model. Plot the residuals.
+```{r}
+residualarima100 <- Arima(linearmodel$residuals, order = c(1,0,0))
+df3 <- arma.innovation(df, residualarima100)
+df3 <- as.data.frame(matrix(df3, ncol = 2))
+linearmodel3 <- lm(df3[,2] ~ df3[,1])
+par(mfrow=c(1,2))
+acf(linearmodel3$residuals,length(df3[,1]),main='')
+ts.plot(linearmodel3$residuals)
+```
+
+#4
+Use ARIMA (0,0,2) model for the residuals. Adjust the Input gas rate and Output CO2 % with the MA coefficient. Combine with the linear regression model. Plot the residuals.
+```{r}
+residualarima002 <- Arima(linearmodel$residuals, order = c(0,0,2))
+df4 <- arma.innovation(df, residualarima002)
+df4 <- as.data.frame(matrix(df4, ncol = 2))
+linearmodel4 <- lm(df4[,2] ~ df4[,1])
+par(mfrow=c(1,2))
+acf(linearmodel4$residuals,length(df4[,1]),main='')
+ts.plot(linearmodel4$residuals)
+```
+
+#5
+Use ARIMA (2,0,0) model for the residuals. Adjust the Input gas rate and Output CO2 % with the AR coefficient. Combine with the linear regression model. Plot the residuals.
+```{r}
+residualarima200 <- Arima(linearmodel$residuals, order = c(2,0,0))
+df5 <- arma.innovation(df, residualarima200)
+df5 <- as.data.frame(matrix(df5, ncol = 2))
+linearmodel5 <- lm(df5[,2] ~ df5[,1])
+par(mfrow=c(1,2))
+acf(linearmodel5$residuals,length(df5[,1]),main='')
+ts.plot(linearmodel5$residuals)
+```
+
+#6
+Use ARIMA (2,0,2) model for the residuals. Adjust the Input gas rate and Output CO2 % with the AR and MA coefficients. Combine with the linear regression model. Plot the residuals.
+```{r}
+residualarima202 <- Arima(linearmodel$residuals, order = c(2,0,2))
+df6 <- arma.innovation(df, residualarima202)
+df6 <- as.data.frame(matrix(df6, ncol = 2))
+linearmodel6 <- lm(df6[,2] ~ df6[,1])
+par(mfrow=c(1,2))
+acf(linearmodel6$residuals,length(df6[,1]),main='')
+ts.plot(linearmodel5$residuals)
+```
+
+#7
+Use fractional ARIMA model (aka ARFIMA) for the output gas CO2% - plot the residuals, acf and pacf plots of the model. You can use an R package like fracdiff – be careful to determine which lag to choose when executing this test. 
+```{r}
+library(arfima)
+d <- fracdiff::fracdiff(df$Outlet.gas.CO2.percentage) #get the fractional difference
+st <- fracdiff::diffseries(df$Outlet.gas.CO2.percentage, d$d) #apply the fractional difference
+arfimamodel1 <- auto.arima(st)
+arfimamodel2 <- forecast::arfima(df$Outlet.gas.CO2.percentage) # does the above (fractional difference + ARIMA) in 1 step
+AIC(arfimamodel1,arfimamodel2) # compare the models and choose the one with lower AIC
+#second method has the lower AIC
+arfimamodel <- arfimamodel2
+ts.plot(arfimamodel$residuals)
+par(mfrow=c(1,2))
+acf(arfimamodel$residuals,length(arfimamodel$residuals),main='')
+pacf(arfimamodel$residuals,length(arfimamodel$residuals),main='')
+```
+
+#8
+Perform Summaries, Durbin-Watson and Box-Ljung tests for each model and build table to compare AICs, BICs and p-values for each test across the ARIMA and ARFIMA models.
+```{r}
+library(lmtest)
+
+models <- list(linearmodel,linearmodel2,linearmodel3,linearmodel4,linearmodel5,linearmodel6)
+
+dw <- c()
+bt <- c()
+
+for (i in models){
+  dw <- c(dw,as.numeric(dwtest(i, alternative ='two.sided')['p.value']))
+  bt <- c(bt,as.numeric(Box.test(resid(i), lag = 10, type = "Ljung-Box")['p.value']))
+}
+
+dw <- c(dw,as.numeric(dwtest(lm(arfimamodel$residuals~1), alternative ='two.sided')['p.value']))
+dw <- round(dw,4)
+bt <- c(bt,as.numeric(Box.test(resid(arfimamodel), lag = 10, type = "Ljung-Box")['p.value']))
+
+#Creating Arima models for the AIC and BIC values
+models <- list(Arima(linearmodel$residuals, order = c(0,0,0)),
+               Arima(linearmodel2$residuals, order = c(0,0,1)),
+               Arima(linearmodel3$residuals, order = c(1,0,0)),
+               Arima(linearmodel4$residuals, order = c(0,0,2)),
+               Arima(linearmodel5$residuals, order = c(2,0,0)),
+               Arima(linearmodel6$residuals, order = c(2,0,2)),
+               arfimamodel)
+
+aics <- c()
+bics <- c()
+
+for (i in models){
+  aics <- c(aics, AIC(i))
+  bics <- c(bics, i['bic'])
+}
+
+bics[[7]] <- AIC(arfimamodel2, k=log(arfimamodel2$n))
+
+results <- cbind(dw,bt,aics,bics)
+colnames(results) <- c("Durbin Watson.p-value", "Ljung-Box.p-value","AIC.values","BIC.values")
+rownames(results) <- c("linear.model","arima001","arima100","arima002","arima200","arima202","arfima")
+results
+```
+
+#9
+Based on ACF plots and test results, which ARIMA model gives the best result in terms of residuals being close to white noise?
+
+The ARFIMA resulted in the residuals being closest to white noise. The ARFIMA models is the only model that results in residuals that fail to reject the Durbin Watson and Ljung-Box test's null hypotheses (data is independently distributed; no autocorrelation). With the ACF plots, we would come to the same conclusion. Additionally, ARFIMA has the lowest AIC and BIC values.

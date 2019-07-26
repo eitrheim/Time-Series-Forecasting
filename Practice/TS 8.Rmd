@@ -1,0 +1,362 @@
+---
+title: "Assignment 8"
+author: "Ann Eitrheim"
+output:
+  html_notebook:
+    code_folding: none
+---
+#Importing the data
+Provided is the seat prices from the Chicago Mercantile Exchange. There are three classes of seats CME, IMM, and IOM which confer the rights to trade different sets of commodities traded.
+
+* CME seat owners can trade everything,  
+* IMM seat owners are allowed to trade everything except agricultural products, and  
+* IOM seat owners are allowed to trade only in index products and all options.  
+
+```{r, warning=FALSE}
+setwd("~/Documents/Time_Series_Analysis/Assignment_7")
+cme <- read.csv("cmeS.csv")
+imm <- read.csv("immS.csv")
+iom <- read.csv("iomS.csv")
+```
+
+#Dealing with `#Value!` entries
+```{r}
+dealwithvalues <- function(df){
+  library(stringr)
+  df$Year <- as.numeric(str_sub(df$DateOfSale, -4, -1)) #for the Year column
+  df$Month <- as.numeric(sub('/', '', str_sub(df$DateOfSale, 1, 2))) #& Month column
+  return(df)
+}
+cme <- dealwithvalues(cme)
+imm <- dealwithvalues(imm)
+iom <- dealwithvalues(iom)
+```
+
+#Creating the algorithm
+Your task is to adopt an algorithm to create a time series that contains a seat price for each month starting from January 2001 to December 2013. You need to do this for the 3 classes of seats. Note that all 3 seat classes have sale prices for January 2001 so you should not have any start up issues. Please clearly explain why you adopted your algorithm and what other alternatives you may have considered and why you rejected the alternatives.
+```{r}
+createtimeseries <- function(df){
+  library("dplyr")
+  Year <- sort(rep(seq(2001,2013),12))
+  Month <- rep(seq(1,12),13)
+  YM <- paste(Year, Month)
+  dates <- tbl_df(cbind(Year, Month, YM)) #column to join on
+  indexname <- df[1,5] #to get name of class to be used for plott title
+  df <- df[,2:4] #selecting columns that will be used
+  df$YM <- paste(df$Year, df$Month) #creating column to join on
+  df <- full_join(dates, df, by = "YM") #join to make sure every month in the df
+  df <- df[,c(1,2,6)] #keeping the columnds needed
+  colnames(df) <- c('Year', 'Month', 'price')
+  df$Year <- as.integer(df$Year)
+  df$Month <- as.integer(df$Month)
+  dfna <- tbl_df(df) %>% dplyr::group_by(Year, Month) %>% dplyr::summarize(mean_price = mean(price))
+  
+  library(zoo)
+  df1 <- zoo::na.locf(df) #if a month doesn't have data, it will take the single most recent data point. I am assuming that we do not have the data for Feb when it is Jan. I want to assume we are always forward looking in time.
+  df1$Year <- as.integer(df1$Year)
+  df1$Month <- as.integer(df1$Month)
+  df1 <- tbl_df(df1) %>% dplyr::group_by(Year, Month) %>% dplyr::summarize(mean_price = mean(price))
+  #using the average price for months with multiple prices
+
+  #creating the ts with the dataframe that has NAs and one with all the data
+  dfna <- ts(dfna$mean_price, start=c(2001,1), frequency=12) 
+  dfts <- ts(df1$mean_price, start=c(2001,1), frequency=12)
+  
+#PLOTTING:
+  # library(imputeTS)
+  # if (round(max(dfts)/100000) %% 2 == 1)
+  #   {upperlimit <- 100000 * (round(max(dfts)/100000)+1)} 
+  # else {upperlimit <- 100000 * round(max(dfts)/100000)} #get upper limit for y range
+  # plotNA.distribution(dfna, colBackgroundMV = "gray", lwd = 0, axes = FALSE, cex = 0,
+  #                     main = paste(indexname,'Prices'), ylab = 'Price ($ thousand)',
+  #                     ylim = c(0,upperlimit)) #show where there is missing data
+  # lines(dfts, col = 'red', lwd = 1) #add ts line w/ imputed numbers for mo.s w/o data
+  # points(x=(as.integer(df$Year) + (as.integer(df$Month)-1)/12), y=df$price, pch=20, cex = .45)
+  # #plotting all pricing data points
+  # legend('topright',
+  #        legend = c('Cleaned Time Series', 'Data Points', 'Period with no data'),
+  #        text.col = c('red', 'black', 'gray'), bty = 'o', inset = c(.01,.02))
+  # axis(1)
+  # axis(side = 2, at = seq(0,upperlimit,200000), labels = paste(seq(0,upperlimit/1000,200)), las =1)
+  # box()
+
+  return(dfts)
+}
+```
+
+**Brief Description**: I begin by creating a data frame that contains every year and month from Jan 2001 to Dec 2013. I then do a full join on that information with the data frame that has pricing information (df). This will ensure that every month is represented in the df. From there, I use the most recent, prior data point to impute the price for months without pricing information. Next, for months with more than one data point, I took the average price to represent the month. Lastly, I take the df's price (whether imputed, averaged, or stemming from one single data point) column to create a time series object. I purposefully used the **single** prior data point, instead of the average price from the prior month, that is why I choose to group the data as the last step before making the pricing column a time series. I saved the dataframes throughout the process of cleaning the data as different local variables to help plot 1) where the missing data is, 2) all the available data points, and 3) the cleaned time series.
+
+#Using the algorithm to create and plot the three time series for the different classes
+```{r}
+cmeTS <- createtimeseries(cme)
+immTS <- createtimeseries(imm)
+iomTS <- createtimeseries(iom)
+```
+
+#Assignment 8 - forecast CME seat prices using CME trading volume.
+
+Provided is monthly trading volume for different CME products. Columns show:  
+
+1. first day of the month  
+2. commodity indicator  
+3. short description of the commodity  
+4. whether it is Future (F) or Option (O)  
+5. electronic trading volume  
+6. total trading volume  
+
+Floor trading volume is the difference between the total and electronic volume. To find the volume of a products, add both the futures and options volume for the same index product for a month.
+
+Note that owning a CME seat gives a trader advantage for floor trading. In contrast, owning a CME seat does not have any advantage for electronic trading. Since electronic trading constitutes market participants trading directly with other participants via CME's network connections and order matching engine.
+
+```{r, warning=FALSE}
+setwd("~/Documents/Time_Series_Analysis/Assignment_8")
+volume <- read.csv("Contracts_Volume.csv")
+#reformatting tcolumns be a date datatype
+volume$Date <- base::as.Date(volume$Date,"%m/%d/%Y")
+volume$Electronic.Volume <- as.double(gsub(",","",volume$Electronic.Volume))
+volume$Commodity.Indicator <- as.character(volume$Commodity.Indicator)
+#creating floor trading volume column
+volume$Floor.Volume <- volume$Total.Volume - volume$Electronic.Volume
+```
+
+The following associates each CME commodity with a seat class.
+```{r}
+classification <- read.csv("Contracts_Classification.csv")
+#reformating columns
+classification$Division <- as.character(classification$Division)
+classification$Commodity.Code <- as.character(classification$Commodity.Code)
+```
+
+```{r}
+#creating CME time series for total, floor, and electric volumes - CME can trade everything
+df <- tbl_df(volume) %>% dplyr::group_by(Date) %>% dplyr::summarize(CME.Volume = sum(Total.Volume))
+cmeTotalVolume <- ts(df[13:168,2], start=c(2001,1), frequency=12) #not taking the first 12 entries as that has 2000
+df <- tbl_df(volume) %>% dplyr::group_by(Date) %>% dplyr::summarize(CME.Volume = sum(Electronic.Volume))
+cmeElectronicVolume <- ts(df[13:168,2], start=c(2001,1), frequency=12)
+df <- tbl_df(volume) %>% dplyr::group_by(Date) %>% dplyr::summarize(CME.Volume = sum(Floor.Volume))
+cmeFloorVolume <- ts(df[13:168,2], start=c(2001,1), frequency=12)
+```
+
+```{r}
+#creating IMM time series for total, floor, and electric volumes
+df <- tbl_df(classification) %>% dplyr::filter(Division == 'IMM')
+df1 <- full_join(df, volume, by = c('Commodity.Code' = 'Commodity.Indicator')) %>% dplyr::group_by(Date) %>% dplyr::summarize(sum(Total.Volume))
+immTotalVolume <- ts(df1[13:168,2], start=c(2001,1), frequency=12)
+df1 <- full_join(df, volume, by = c('Commodity.Code' = 'Commodity.Indicator')) %>% dplyr::group_by(Date) %>% dplyr::summarize(CME.Volume = sum(Electronic.Volume))
+immElectronicVolume <- ts(df1[13:168,2], start=c(2001,1), frequency=12)
+df1 <- full_join(df, volume, by = c('Commodity.Code' = 'Commodity.Indicator')) %>% dplyr::group_by(Date) %>% dplyr::summarize(CME.Volume = sum(Floor.Volume))
+immFloorVolume <- ts(df1[13:168,2], start=c(2001,1), frequency=12)
+```
+
+```{r}
+#creating IOM time series for total, floor, and electric volumes
+df <- tbl_df(classification) %>% dplyr::filter(Division == 'IOM')
+df1 <- full_join(df, volume, by = c('Commodity.Code' = 'Commodity.Indicator')) %>% dplyr::group_by(Date) %>% dplyr::summarize(sum(Total.Volume))
+iomTotalVolume <- ts(df1[13:168,2], start=c(2001,1), frequency=12)
+df1 <- full_join(df, volume, by = c('Commodity.Code' = 'Commodity.Indicator')) %>% dplyr::group_by(Date) %>% dplyr::summarize(CME.Volume = sum(Electronic.Volume))
+iomElectronicVolume <- ts(df1[13:168,2], start=c(2001,1), frequency=12)
+df1 <- full_join(df, volume, by = c('Commodity.Code' = 'Commodity.Indicator')) %>% dplyr::group_by(Date) %>% dplyr::summarize(CME.Volume = sum(Floor.Volume))
+iomFloorVolume <- ts(df1[13:168,2], start=c(2001,1), frequency=12)
+```
+
+```{r}
+#splitting the price time series into train and test
+cmetest <- window(cmeTS, start = c(2013,1))
+cmeTS <- window(cmeTS, end = c(2012,12))
+
+immtest <- window(immTS, start = c(2013,1))
+immTS <- window(immTS, end = c(2012,12))
+
+iomtest <- window(iomTS, start = c(2013,1))
+iomTS <- window(iomTS, end = c(2012,12))
+```
+
+#Task A:
+
+###Linear regression (seat price is independent, volumes(s) dependent)
+I decided to use price as the dependent variable as that is what we are trying to predict.
+```{r, fig.width=6, fig.height=2}
+cmeLM <- lm(cmeTS ~ cmeTotalVolume[1:144])
+# summary(cmeLM)
+par(mfrow=c(1,2))
+plot(cmeTotalVolume[1:144], cmeTS, main = "CME Linear Regression", ylab = 'Price', xlab = 'Volume')
+abline(coef = c(cmeLM$coefficients[1],cmeLM$coefficients[2]), col = 2)
+acf(cmeLM$residuals, main = "", lag = 50)
+
+immLM <- lm(immTS ~ immTotalVolume[1:144])
+# summary(immLM)
+plot(immTotalVolume[1:144], immTS, main = "IMM Linear Regression", ylab = 'Price', xlab = 'Volume')
+abline(coef = c(immLM$coefficients[1],immLM$coefficients[2]), col = 2)
+acf(immLM$residuals, main = "", lag =50)
+
+iomLM <- lm(iomTS ~ iomFloorVolume[1:144])
+# summary(iomLM)
+plot(iomFloorVolume[1:144], iomTS, main = "IOM Linear Regression", ylab = 'Price', xlab = 'Volume')
+abline(coef = c(iomLM$coefficients[1],iomLM$coefficients[2]), col = 2)
+acf(iomLM$residuals, main = "", lag = 50)
+```
+The ACF graphs shows autocorrelation in the residuals.
+
+###Linear regression with ARMA errors (use arima with xreg)
+```{r, fig.width=6, fig.height=2, warning=FALSE}
+library(forecast)
+#auto.arima(cmeLM$residuals, stepwise = FALSE)
+#cmeLMARMAerrors <- Arima(cmeTS, order=c(3,0,1), xreg = cmeTotalVolume[1:144]*100)
+cmeLMARMAerrors <- auto.arima(cmeTS, xreg = cmeTotalVolume[1:144], stepwise = FALSE)
+par(mfrow=c(1,2))
+plot(forecast(cmeLMARMAerrors, h=12, xreg = cmeTotalVolume[145:156]))
+acf(cmeLMARMAerrors$residuals, 48, main='')
+
+#auto.arima(immLM$residuals, stepwise = FALSE)
+#immLMARMAerrors <- Arima(immTS, order=c(0,1,4), xreg = immTotalVolume[1:144])
+immLMARMAerrors <- auto.arima(immTS, xreg = immTotalVolume[1:144], stepwise = FALSE)
+plot(forecast(immLMARMAerrors, h=12, xreg = immTotalVolume[145:156]))
+acf(immLMARMAerrors$residuals, 48, main='')
+
+#auto.arima(iomLM$residuals, stepwise = FALSE)
+#iomLMARMAerrors <- Arima(iomTS, order = c(1,0,2), xreg = iomFloorVolume[1:144]*100)
+iomLMARMAerrors <- auto.arima(iomTS, xreg = iomFloorVolume[1:144],  stepwise = FALSE)
+plot(forecast(iomLMARMAerrors, h=12, xreg = iomFloorVolume[145:156]))
+acf(iomLMARMAerrors$residuals, 48, main='')
+```
+
+###Holt Winters
+```{r, fig.width=6, fig.height=2}
+cmeHW <- HoltWinters(cmeTS, gamma = FALSE)
+par(mfrow=c(1,2))
+plot(forecast(cmeHW, h=12), ylab = "Price")
+acf(residuals(cmeHW), 48, main='')
+
+immHW <- HoltWinters(immTS, gamma = FALSE)
+plot(forecast(immHW, h=12), ylab = "Price")
+acf(residuals(immHW), 48, main='')
+
+iomHW <- HoltWinters(iomTS, gamma = FALSE)
+plot(forecast(iomHW, h=12), ylab = "Price")
+acf(residuals(iomHW), 48, main='')
+```
+
+###ARIMA
+```{r, fig.width=6, fig.height=2}
+cmeARIMA <- auto.arima(cmeTS, seasonal = FALSE, stepwise = FALSE)
+par(mfrow=c(1,2))
+plot(forecast(cmeARIMA, h=12), ylab ='Price')
+acf(residuals(cmeARIMA), 48, main='')
+
+immARIMA <- auto.arima(immTS, seasonal = FALSE, stepwise = FALSE)
+plot(forecast(immARIMA, h=12), ylab ='Price')
+acf(residuals(immARIMA), 48, main='')
+
+iomARIMA <- auto.arima(iomTS, seasonal = FALSE, stepwise = FALSE)
+plot(forecast(iomARIMA, h=12), ylab ='Price')
+acf(residuals(iomARIMA), 48, main='')
+```
+
+###Seasonal ARIMA (SARIMA) - here seasonality is monthly
+```{r, fig.width=6, fig.height=2}
+cmeSARIMA <- auto.arima(cmeTS, stepwise = FALSE)
+par(mfrow=c(1,2))
+plot(forecast(cmeSARIMA, h=12), ylab ='Price')
+acf(residuals(cmeSARIMA), 48, main='')
+
+immSARIMA <- auto.arima(immTS, stepwise = FALSE)
+plot(forecast(immSARIMA, h=12), ylab ='Price')
+acf(residuals(immSARIMA), 48, main='')
+
+iomSARIMA <- auto.arima(iomTS, stepwise = FALSE)
+plot(forecast(iomSARIMA, h=12), ylab ='Price')
+acf(residuals(iomSARIMA), 48, main='')
+```
+
+###Fractional ARIMA (ARFIMA) - check applicability first using the ACF
+```{r, fig.width=6, fig.height=2}
+acf(cmeTS, 48) #long memory
+cmeARFIMA <- forecast::arfima(cmeTS) 
+par(mfrow=c(1,2))
+plot(forecast(cmeARFIMA, h=12), ylab = "Price")
+acf(cmeARFIMA$residuals, 48, main='')
+
+par(mfrow=c(1,1))
+acf(immTS, 48) #long memory
+immARFIMA <- forecast::arfima(immTS) 
+par(mfrow=c(1,2))
+plot(forecast(immARFIMA, h=12), ylab = "Price")
+acf(immARFIMA$residuals, 48, main='')
+
+par(mfrow=c(1,1))
+acf(iomTS, 48) #long memory
+iomARFIMA <- forecast::arfima(iomTS) 
+par(mfrow=c(1,2))
+plot(forecast(iomARFIMA, h=12), ylab = "Price")
+acf(iomARFIMA$residuals, 48, main='')
+```
+
+###ARMA and GARCH combination - use the fGarch R library and garchFit()
+```{r, fig.width=6, fig.height=2}
+library("fGarch")
+cmeGARCH <- garchFit(~ garch(1,0), data = cmeTS/10, trace = FALSE)
+par(mfrow=c(1,2))
+acf(cmeGARCH@residuals,48, main='')
+predict(cmeGARCH, 12, plot = T)[0]
+
+immGARCH <- garchFit(~ garch(1,0), data = immTS/10, trace = FALSE)
+acf(immGARCH@residuals,48, main='')
+predict(immGARCH, 12, plot = T)[0]
+
+iomGARCH <- garchFit(~ garch(2,1), data = iomTS/10, trace = FALSE)
+acf(iomGARCH@residuals,48, main='')
+predict(iomGARCH, 12, plot = T)[0]
+```
+
+#Task B:
+
+###Evaluate each algorithm from Task A using sMAPE. Which one do you recommend to forecast monthly prices for each of the seat classes?
+```{r, warning= FALSE}
+smape <- function(act, pred)
+{
+  sm <- abs(act - pred) / ((abs(act) + abs(pred))/2)
+  return(sum(sm, na.rm = T) /length(act))
+}
+
+x = c(
+#Linear regression
+smape(cmetest, predict(cmeLM, data.frame("cmeTotalVolume" = cmeTotalVolume[145:156]))[1:12]),
+smape(immtest, predict(immLM, data.frame("immTotalVolume" = immTotalVolume[145:156]))[1:12]),
+smape(iomtest, predict(iomLM, data.frame("immFloorVolume" = immFloorVolume[145:156]))[1:12]),
+#Linear regression with ARMA errors
+smape(cmetest, forecast(cmeLMARMAerrors, h=12, xreg = cmeTotalVolume[145:156]*100)$mean),
+smape(immtest, forecast(immLMARMAerrors, h=12, xreg = immTotalVolume[145:156])$mean),
+smape(iomtest, forecast(iomLMARMAerrors, h=12, xreg = iomFloorVolume[145:156]*100)$mean),
+#Holt Winters
+smape(cmetest, forecast(cmeHW, h=12)$mean),
+smape(immtest, forecast(immHW, h=12)$mean),
+smape(iomtest, forecast(iomHW, h=12)$mean),
+#ARIMA
+smape(cmetest, forecast(cmeARIMA, h=12)$mean),
+smape(immtest, forecast(immARIMA, h=12)$mean),
+smape(iomtest, forecast(iomARIMA, h=12)$mean),
+#Seasonal ARIMA (SARIMA)
+smape(cmetest, forecast(cmeSARIMA, h=12)$mean),
+smape(immtest, forecast(immSARIMA, h=12)$mean),
+smape(iomtest, forecast(iomSARIMA, h=12)$mean),
+#Fractional ARIMA (ARFIMA)
+smape(cmetest, forecast(cmeARFIMA, h=12)$mean),
+smape(immtest, forecast(immARFIMA, h=12)$mean),
+smape(iomtest, forecast(iomARFIMA, h=12)$mean),
+#ARMA and GARCH combination
+smape(cmetest, predict(cmeGARCH, 12)$meanForecast*10),
+smape(immtest, predict(immGARCH, 12)$meanForecast*10),
+smape(iomtest, predict(iomGARCH, 12)$meanForecast*10))
+
+x <- matrix(x,ncol=3, byrow = T)
+rownames(x) <- c("lin.reg","lin.reg.arma.errors","holt.winters","arima","sarima","arfima","arma.garch.combo")
+colnames(x) <- c("CME","IMM","IOM")
+x
+```
+
+
+Best model for CME: Seasonal ARIMA
+Best model for IMM: linear regression with ARMA errors (regressed on total volumes)
+Best model for IOM: ARIMA and Seasonal ARIMA
+
+Both IMM and IOM had the same model for non-seasonal arima and seasonal arima, so there must not be noticable seasonality in the price for those. I was expecting linear regression with ARMA errors to have a better sMAPE than linear regression for all of the indexes, so I was surprised that it did not.

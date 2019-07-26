@@ -1,0 +1,229 @@
+---
+title: "TS Assignment 3"
+author: "Ann Eitrheim"
+output: html_notebook
+---
+
+# Loading the data and exploring it
+
+```{r}
+setwd("~/Documents/Time_Series_Analysis/Assignment 3")
+library(gdata)
+df = read.xls ("Unemployment_GDP_UK.xlsx", sheet = 1, header = TRUE)
+require(zoo)
+df[,1] <- na.locf(df[,1])
+df$YandQ <- df$Year + df$Quarter/4 -.25
+df <- df[c('Year','YandQ','UN','GDP')]
+head(df)
+```
+
+#Checking for seasonality
+
+```{r, echo=FALSE}
+par(mfrow=c(1,1))
+plot.ts(df$UN,main="UN Time-Series Plot")
+```
+
+```{r, echo=FALSE}
+par(mfrow=c(1,2))
+acf(df$UN,length(df$UN),main='')
+pacf(df$UN,length(df$UN),main='')
+```
+
+The "UN Time-Series Plot" and ACF graph points to cyclicality (not seasonality) as it takes more than 4 to 8 quarters to repeat a pattern.
+
+```{r}
+decompose(df$UN,type = c("additive", "multiplicative"))
+```
+
+The fact that the function *decompose()* gives this error, it implies that the time series has no seasonal cycles or at least less than 2 seasonal cycles.
+
+```{r, echo=FALSE}
+plot.ts(df$GDP,main="GDP Time-Series Plot")
+```
+
+
+```{r, echo=FALSE}
+par(mfrow=c(1,2))
+acf(df$GDP,length(df$GDP),main='')
+pacf(df$GDP,main='')
+```
+
+This time series shows a trend, which can be seen in the "GDP Time-Series Plot" so I am expecting d >= 1 to remove the trend and make GDP stationary. I do not see seasonality as there is no repeating pattern in the ACF graph nor the "GDP Time-Series Plot."
+
+```{r}
+decompose(df$GDP,type = c("additive", "multiplicative"))
+```
+
+The fact that the function *decompose()* gives this error, it implies that the time series has no seasonal cycles or at least less than 2 seasonal cycles.
+
+#Checking for stationarity
+
+```{r}
+library('tseries')
+kpss.test(df$UN,null = "Trend") #we want a high p-value to not reject Ho:stationary TS
+kpss.test(df$GDP, null = "Trend")
+```
+
+KPSS test for UN has a p-value >0.1 so we do not reject the null Hypothesis: stationary TS. Unfortunately the GDP series isn't stationary with a p-value of 0.022, but luckily the ARIMA function will take the difference to make it stationary (I am expecting d >= 1 for GDP).
+
+***
+
+# ARIMA modeling:
+### 1. Use datasets from 1955 to 1968 to build an ARMA or ARIMA models for UN and GDP. Use auto.arima() from package forecast.
+
+```{r}
+data = df[1:56,] #data from 1955 to 1968
+library(forecast)
+```
+
+
+```{r}
+mdlUN <- auto.arima(data$UN, stepwise=F, trace = T)
+mdlUNarma <- auto.arima(data$UN, d=0, stepwise=F, trace = T)
+mdlGDP <- auto.arima(data$GDP, stepwise=F,trace = T)
+mdlGDParma <- auto.arima(data$GDP, d=0, stepwise=F, trace = T)
+```
+
+### 2. Justify why you chose (ARMA or ARIMA) one over the other.  Note there will be 2 models, one for UN and another for GDP.
+
+```{r}
+summary(mdlUN)
+summary(mdlUNarma)
+c('ARIMA AIC'=mdlUN$aic,
+  'ARMA AIC'=mdlUNarma$aic)
+```
+
+The best model returned for UN after going through a matrix of posibilities, is an ARIMA one, not ARMA. It returned ARIMA(1,1,0). Since d=1, it is an ARIMA model. Additionally, when I forced d=0, therefore forcing an ARMA model, the AIC is larger than the AIC for the ARIMA model. This reinforces our selection of an ARIMA model as we want the smaller AIC.
+
+```{r}
+summary(mdlGDP)
+summary(mdlGDParma)
+c('ARIMA AIC'=mdlGDP$aic,
+  'ARMA AIC'=mdlGDParma$aic)
+```
+
+The best model returned for GDP after going through a matrix of posibilities, is an ARIMA one, not ARMA. It returned ARIMA(0,1,0). Since d=1, it is an ARIMA model. Additionally, when I forced d=0, therefore forcing an ARMA model, the AIC is larger than the AIC for the ARIMA model. This reinforces our selection of an ARIMA model.
+
+### 3. Use the chosen UN and GDP models to forecast the UN and the GDP for 1969. Use forecast() from package forecast.
+
+```{r}
+UN69f <- forecast(mdlUN, h=4)
+GDP69f <- forecast(mdlGDP, h=4)
+```
+
+```{r, echo=FALSE}
+plot(UN69f,main = 'UN ARIMA Forecast for 1969')
+plot(GDP69f,main = 'GDP ARIMA Forecast for 1969')
+```
+
+
+### 4. Compare your forecasts with the actual values using error = actual - estimate and plot the errors.
+
+```{r}
+UNa <- df[,3] #for all years
+GDPa <- df[,4]
+UN69a <- UNa[57:60] #for only 1969
+GDP69a <- GDPa[57:60]
+```
+
+```{r}
+UNerrors <- (UN69a - c(UN69f$fitted,UN69f$mean)) #getting all the errors
+UNerrors69 <- tail(UNerrors,4)
+plot(y=UNerrors,x=df[,2], xlab = "Year", main="Prediction Errors for UN")
+points(x=tail(df[,2],4),y=UNerrors69, pch = 19,col='red')
+legend('topright', legend="Red dots are the errors for 1969",box.lty=0, inset = .02)
+```
+
+```{r}
+GDPerrors <- (GDPa - c(GDP69f$fitted,GDP69f$mean)) #getting all the errors
+GDPerrors69 <- tail(GDPerrors,4)
+plot(y=GDPerrors,x=df[,2], xlab = "Year", main="Prediction Errors for GDP")
+points(x=tail(df[,2],4),y=GDPerrors69, pch = 19,col='red')
+legend('topright', legend="Red dots are the errors for 1969",box.lty=0, inset = .02)
+```
+
+### 5. Calculate the sum of squared error for each UN and GDP models.
+
+```{r}
+#UN SSE:
+y <- sum(UNerrors69^2) #sum of squared errors for 1969 predictions 2,718.519
+paste(round(y,3),'SSE for 1969 forecasted predictions')
+#for curiousity I found the total sum of squared errors for UN from 1955 to 1969
+x <- sum(UNerrors^2)
+paste(round(x,3), 'SSE for 1955-1969 predictions')
+```
+
+```{r}
+#GDP SSE:
+y <- sum(GDPerrors69^2) #sum of squared errors for 1969 predictions is 5.85944
+paste(round(y,3),'SSE for 1969 forecasted predictions')
+#for curiousity I found the total sum of squared errors for GDP from 1955 to 1969
+x <- sum(GDPerrors^2)
+paste(round(x,3), 'SSE for 1955-1969 predictions')
+```
+
+***
+
+# Regression - build regression models that use:
+### 1. UN as the independent variable and GDP as the dependent variable - use data from 1955 to 1968 to build the model. Forecast for 1969 and plot the errors as a percentage of the mean. Also calculate the sum of squared(error) as a percentage of the mean.
+
+```{r}
+data = df[1:56,] #data from 1955 to 1968
+mdl <- lm(GDP ~ UN, data = data) #building the model on that data
+GDPs <- as.data.frame(df[,3]) #getting the independent variables through 1969
+colnames(GDPs) <- c("UN") #forematting for predict function
+GDPf <- predict(mdl, as.data.frame(GDPs)) #forecasting GDP
+GDP69f <- tail(GDPf,4) #forecasted 1969 GDP
+GDPa <- df[,4] #actual GDP
+GDP69a  <- tail(GDPa,4) #actual 1969 GDP
+errors <- (GDPa-GDPf)
+errors69 <- (GDP69a-GDP69f)
+errorsM <- errors/mean(GDPa) #all errors as percent of the mean of the actual GDP from 1955 through 1969
+errorsM69 <- errors69/mean(GDP69a) #errors as percent of the mean of 1969's actual GDPs
+plot(y=errorsM69,x=df$YandQ[57:60],main="1969 Prediction Errors as % of the mean of 1969's actual GDPs", xlab = 'Year')
+plot(y=errorsM,x=df$YandQ,main="Errors as % of the actual mean from 1955-1969", xlab = 'Year')
+abline(h=0, col="blue")
+summary(mdl)
+SSerrors1 <- sum(errors69^2)/mean(GDP69a)
+paste(round(SSerrors1,4), ": sum of squared error as a percentage of the mean of the actual values for 1969")
+SSerrors1all <- sum(errors^2)/mean(GDPa)
+paste(round(SSerrors1all,4),": squared errors summed as percent of the actual mean for 1955-1969")
+```
+
+### 2. GDP as the independent variable and UN as the dependent variable - use data from 1955 to 1968 to build the model. Forecast for 1969 and plot the errors as a % of the mean. Also calculate the sum of squared(error) as a % of the mean of the actual values.
+
+```{r}
+data = df[1:56,] #data from 1955 to 1968
+mdl <- lm(UN ~ GDP, data = data) #building the model on that data
+UNs <- as.data.frame(df[,4]) #getting the independent variables through 1969
+colnames(UNs) <- c("GDP") #forematting for predict function
+UNf <- predict(mdl, as.data.frame(UNs)) #forecasting UN
+UN69f <- tail(UNf,4) #forecasted 1969 UN
+UNa <- df[,3] #actual UN
+UN69a  <- tail(UNa,4) #actual 1969 GDP
+errors <- (UNa-UNf)
+errors69 <- (UN69a-UN69f)
+errorsM <- errors/mean(UNa) #all errors as percent of the mean of the actual UN from 1955 through 1969
+errorsM69 <- errors69/mean(UN69a) #errors as percent of the mean of 1969's actual UNs
+plot(y=errorsM69,x=df$YandQ[57:60],main="1969 Prediction Errors as % of the mean of 1969's actual UNs", xlab = 'Year')
+abline(h=0, col="blue")
+plot(y=errorsM,x=df$YandQ,main="Errors as % of the actual mean from 1955-1969", xlab = 'Year')
+abline(h=0, col="blue")
+summary(mdl)
+SSerrors2 <- sum(errors69^2)/mean(UN69a)
+paste(round(SSerrors2,4), ": sum of squared error as a percentage of the mean of the actual values for 1969")
+SSerrors2all <- sum(errors^2)/mean(UNa)
+paste(round(SSerrors2all,4),": squared errors summed as percent of the actual mean for 1955-1969")
+```
+
+### 3. Compare the 2 models using the sum of squared error as a percentage of the mean of the actual values - any reason to believe which should be the independent and the dependent variable?
+
+```{r}
+#sum of squared error as a percentage of the mean of the actual values the test set (for 1969).
+c("Model 1"=SSerrors1, "Model 2"=SSerrors2)
+#sum of squared error as a percentage of the mean of the actual values the train AND test set (for 1955-1969).
+c("Model 1"=SSerrors1all, "Model 2"=SSerrors2all)
+```
+
+The first model where we use UN to predict GDP has a lower sum of squared error as a percentage of the mean for the test set. This is also the case when we fit the model to all the data (1955 through 1969; all 60 rows of data; the train and test set). Therefore, we should use UN as the independent variable and GDP as the dependent variable.

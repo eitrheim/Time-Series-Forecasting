@@ -1,0 +1,94 @@
+---
+title: "Assignment 7 - CME Monthly Seat Prices"
+author: "Ann Eitrheim"
+output:
+  html_notebook:
+    code_folding: none
+---
+#Importing the data
+Provided is the seat prices from the Chicago Mercantile Exchange. There are three classes of seats CME, IMM, and IOM which confer the rights to trade different sets of commodities traded.
+
+* CME seat owners can trade everything,  
+* IMM seat owners are allowed to trade everything except agricultural products, and  
+* IOM seat owners are allowed to trade only in index products and all options.  
+
+```{r}
+setwd("~/Documents/Time_Series_Analysis/Assignment_7")
+cme <- read.csv("cmeS.csv")
+imm <- read.csv("immS.csv")
+iom <- read.csv("iomS.csv")
+```
+
+#Dealing with `#Value!` entries
+```{r}
+dealwithvalues <- function(df){
+  library(stringr)
+  df$Year <- as.numeric(str_sub(df$DateOfSale, -4, -1)) #for the Year column
+  df$Month <- as.numeric(sub('/', '', str_sub(df$DateOfSale, 1, 2))) #& Month column
+  return(df)
+}
+cme <- dealwithvalues(cme)
+imm <- dealwithvalues(imm)
+iom <- dealwithvalues(iom)
+```
+
+#Creating the algorithm
+Your task is to adopt an algorithm to create a time series that contains a seat price for each month starting from January 2001 to December 2013. You need to do this for the 3 classes of seats. Note that all 3 seat classes have sale prices for January 2001 so you should not have any start up issues. Please clearly explain why you adopted your algorithm and what other alternatives you may have considered and why you rejected the alternatives.
+```{r}
+createtimeseries <- function(df){
+  library("dplyr")
+  Year <- sort(rep(seq(2001,2013),12))
+  Month <- rep(seq(1,12),13)
+  YM <- paste(Year, Month)
+  dates <- tbl_df(cbind(Year, Month, YM)) #column to join on
+  indexname <- df[1,5] #to get name of class to be used for plott title
+  df <- df[,2:4] #selecting columns that will be used
+  df$YM <- paste(df$Year, df$Month) #creating column to join on
+  df <- full_join(dates, df, by = "YM") #join to make sure every month in the df
+  df <- df[,c(1,2,6)] #keeping the columnds needed
+  colnames(df) <- c('Year', 'Month', 'price')
+  df$Year <- as.integer(df$Year)
+  df$Month <- as.integer(df$Month)
+  dfna <- tbl_df(df) %>% dplyr::group_by(Year, Month) %>% dplyr::summarize(mean_price = mean(price))
+  
+  library(zoo)
+  df1 <- zoo::na.locf(df) #if a month doesn't have data, it will take the single most recent data point. I am assuming that we do not have the data for Feb when it is Jan. I want to assume we are always forward looking in time.
+  df1$Year <- as.integer(df1$Year)
+  df1$Month <- as.integer(df1$Month)
+  df1 <- tbl_df(df1) %>% dplyr::group_by(Year, Month) %>% dplyr::summarize(mean_price = mean(price))
+  #using the average price for months with multiple prices
+
+  #creating the ts with the dataframe that has NAs and one with all the data
+  dfna <- ts(dfna$mean_price, start=c(2001,1), frequency=12) 
+  dfts <- ts(df1$mean_price, start=c(2001,1), frequency=12)
+  
+#PLOTTING:
+  library(imputeTS)
+  if (round(max(dfts)/100000) %% 2 == 1)
+    {upperlimit <- 100000 * (round(max(dfts)/100000)+1)} 
+  else {upperlimit <- 100000 * round(max(dfts)/100000)} #get upper limit for y range
+  plotNA.distribution(dfna, colBackgroundMV = "gray", lwd = 0, axes = FALSE, cex = 0,
+                      main = paste(indexname,'Prices'), ylab = 'Price ($ thousand)',
+                      ylim = c(0,upperlimit)) #show where there is missing data
+  lines(dfts, col = 'red', lwd = 1) #add ts line w/ imputed numbers for mo.s w/o data
+  points(x=(as.integer(df$Year) + (as.integer(df$Month)-1)/12), y=df$price, pch=20, cex = .45)
+  #plotting all pricing data points
+  legend('topright',
+         legend = c('Cleaned Time Series', 'Data Points', 'Period with no data'),
+         text.col = c('red', 'black', 'gray'), bty = 'o', inset = c(.01,.02))
+  axis(1)
+  axis(side = 2, at = seq(0,upperlimit,200000), labels = paste(seq(0,upperlimit/1000,200)), las =1)
+  box()
+
+  return(dfts)
+}
+```
+
+**Brief Description**: I begin by creating a data frame that contains every year and month from Jan 2001 to Dec 2013. I then do a full join on that information with the data frame that has pricing information (df). This will ensure that every month is represented in the df. From there, I use the most recent, prior data point to impute the price for months without pricing information. Next, for months with more than one data point, I took the average price to represent the month. Lastly, I take the df's price (whether imputed, averaged, or stemming from one single data point) column to create a time series object. I purposefully used the **single** prior data point, instead of the average price from the prior month, that is why I choose to group the data as the last step before making the pricing column a time series. I saved the dataframes throughout the process of cleaning the data as different local variables to help plot 1) where the missing data is, 2) all the available data points, and 3) the cleaned time series.
+
+#Using the algorithm to create and plot the three time series for the different classes
+```{r}
+cmeTS <- createtimeseries(cme)
+immTS <- createtimeseries(imm)
+iomTS <- createtimeseries(iom)
+```

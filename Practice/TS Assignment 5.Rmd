@@ -1,0 +1,203 @@
+---
+title: "Assignment 5"
+author: "Ann Eitrheim"
+output:
+  html_notebook:
+    code_folding: none
+---
+
+#Load data
+from TSA package (the package is written by authors Jonathan Cryer and Kung-Sik Chan).
+```{r}
+library("TSA")
+data(beersales)
+```
+  
+####Checking if the time series is stationary:
+```{r, warning=FALSE}
+library(tseries)
+adf.test(beersales)
+kpss.test(beersales, null= "Trend")
+```
+ADF test rejects the null hypothesis (Ho: non-stationary TS). KPSS test comes to the same conclusion. It fails to reject null, which is that the TS is trend stationary. ARIMA handles the trend with d=1.
+
+####Looking at the seasonal decomposition of the time series:
+```{r}
+plot(decompose(beersales))
+```
+
+The data is the monthly beer sales in millions of barrels, 01/1975 - 12/1990.
+```{r}
+#Train: 01/1975 - 12/1989.
+train <- window(beersales, end = c(1989,12))
+#Test: 1990
+test <- window(beersales, start = c(1990,1))
+```
+
+#Part 1
+use ARIMA(p,d,q) model to forecast beer sales for all months of 1990 using the following two multi-step forecasting approaches. For each model, check mean, autocorrelation and normality of the residuals. Confirm if the residuals are white noise.
+
+#1A
+Use the h-period in forecast() to forecast each month of 1990. This is also known as recursive forecasting where you fit a model only once and use it recursively for h-periods.
+```{r}
+library("forecast")
+tStart<-proc.time() #start timing
+beerarima <- auto.arima(train, stepwise = F)
+mean(beerarima$residuals)
+#The mean of the residuals is not zero, so the model is biased. The model is overestimating on average so we add 0.04490294 to all forecasts.
+beerarima.recursive.forecast <- forecast(beerarima, h=12)
+beerarima.recursive.forecast <- beerarima.recursive.forecast$mean - mean(beerarima$residuals)
+tEnd<-proc.time() #end timing
+(TimeSpent_1<-tEnd-tStart)
+```
+
+#1B
+Use the monthly data as a continuous time series. Forecast for 1990 Jan, Plug forecast into the time series, build a new model to forecast for 1990 Feb. And so on and so forth. In other words, h=1 in all the forecasts. This is known as direct recursive (DirRec) forecasting where you fit a new model for each time step.
+```{r}
+tStart<-proc.time() #start timing
+beerarima.DirRec.ts <- train
+
+beerarima.DirRec = list()
+
+for (i in 1:12){
+  beerarima.DirRec[[i]] <- auto.arima(beerarima.DirRec.ts, stepwise = F)
+  y <-beersales[1:length(unlist(beerarima.DirRec[[i]]['fitted']))]-unlist(beerarima.DirRec[[i]]['fitted']) #residuals
+  x <- forecast(beerarima.DirRec[[i]], h=1)$mean - mean(y)  #removing bias if mean of residuals != 0
+  beerarima.DirRec.ts <- ts(c(beerarima.DirRec.ts,x), start=start(train), frequency=frequency(train))
+}
+
+beerarima.DirRec.forecast <- window(beerarima.DirRec.ts, start = c(1990,1))
+tEnd<-proc.time() #end timing
+(TimeSpent_2<-tEnd-tStart)
+```
+
+####Looking at the model used for each step:
+```{r}
+x <- 1
+for (i in 1:12){
+  print(paste(beerarima.DirRec[[i]],"- Model", x))
+  x <- x + 1
+}
+```
+The ARIMA model for Nov and Dec are different from the previous models.
+
+#1C
+Plot the mean, the p-value of the autocorrelation test, and the p-value of the normality test of the residuals of the 12 models.
+```{r}
+#Putting residuals into list for cleaner code
+df <- list()
+for (i in 1:12) {df[[i]] <- beersales[1:length(unlist(beerarima.DirRec[[i]]['fitted']))]-unlist(beerarima.DirRec[[i]]['fitted'])}
+```
+
+####Looking at the mean:
+```{r}
+resMeans <- c()
+for (i in 1:12){resMeans <- c(resMeans, mean(df[[i]]))}
+
+x <- seq(1,12)
+
+plot(x,resMeans,
+     type='o',
+     ylim = c(-.05,0),
+     xlab = "Model Number",
+     ylab = "Average Residual of the Model",
+     main = "Mean of Residuals (Actuals - Fitted Values)")
+
+legend("top", inset = .01, box.lty=0, legend = c("Residuals of data used to fit the model","   not of the single forecasted value"))
+```
+The mean is not 0 for any of the model. That is why I added the residual back to the forecast to remove the bias.
+
+####Looking at Autocorrelation:
+```{r}
+resAutocorrP <- c()
+for (i in 1:12){resAutocorrP <- c(resAutocorrP, (Box.test(df[[i]], lag = 2*24, type = "Ljung-Box")['p.value']))}
+#number of lags to test: frequency * 2
+
+plot(x, resAutocorrP,
+     type='o',
+     ylim = c(0,.1),
+     xlab = "Model Number",
+     ylab = "P-value",
+     main = "P-value of Ljung-Box Test")
+
+legend("top", inset = .01, box.lty=0, legend = ("Ho: Residuals are independent and not autocorrelated"))
+```
+We reject the null hypothesis, the residuals are autocorrelated.
+
+####Looking at Normality:
+```{r}
+resNormP <- c()
+for (i in 1:12){resNormP <- c(resNormP,(ks.test(df[[i]],"pnorm", mean=mean(df[[i]]), sd(df[[i]]))[2]))}
+
+plot(x, resNormP,
+     type='o',
+     ylim = c(0,1),
+     xlab = "Model Number",
+     ylab = "P-value",
+     main = "Kolmogorov-Smirnov Test - Pvalue")
+
+legend("top", inset = .01, box.lty=0, legend = ("Ho: Residuals have same distribution as the Normal Distribution"))
+```
+
+```{r}
+resNormP <- c()
+for (i in 1:12){resNormP <- c(resNormP,(shapiro.test(df[[i]])[2]))}
+
+plot(x, resNormP,
+     type='o',
+     ylim = c(0,.1),
+     xlab = "Model Number",
+     ylab = "P-value",
+     main = "Shapiro-Wilk Test - Pvalue")
+
+legend("top", inset = .01, box.lty=0, legend = ("Ho: Residuals are normally distributed"))
+```
+Residuals are normally distributed when using the Kolmogorov-Smirnov test, yet the Shapiro–Wilk test gives conflicting results. It rejects the null hypothesis that the residuals are normally distributed.
+
+####Plotting the a histogram and qqplot of the residuals:
+```{r}
+par(mfrow=c(2,2))
+x<-1
+for (i in 1:12){
+  hist(beersales[1:length(unlist(beerarima.DirRec[[i]]['fitted']))]-unlist(beerarima.DirRec[[i]]['fitted']),
+       main=paste("Model",x,"residuals"),
+       xlab = "")
+  x <- x + 1
+}
+
+x<-1
+for (i in 1:12){
+  qqnorm(beersales[1:length(unlist(beerarima.DirRec[[i]]['fitted']))]-unlist(beerarima.DirRec[[i]]['fitted']),
+         main=paste("Model",x,"residuals"),
+         xlab = "",
+         asp=1)
+  qqline(beersales[1:length(unlist(beerarima.DirRec[[i]]['fitted']))]-unlist(beerarima.DirRec[[i]]['fitted']), col = "red")
+  x <- x + 1
+}
+```
+There is a positive skew to the residuals.
+
+The residuals do not have a mean of 0, have autocorrelation, and do not have a normal distribution. We can not confirm that the residuals for the 12 models are white noise.
+
+#Part 2
+Plot the Recursive and DirRec along with the actuals. Use ylim=c(12.5, 17) to get a good visual of the plot differences.
+```{r}
+plot(test, col='black',type='o',ylim=c(12.5, max(test)),
+     ylab="Monthly beer sales in millions of barrels")
+lines(beerarima.DirRec.forecast, col='red')
+lines(beerarima.recursive.forecast, col='orange')
+legend("bottom", legend=c("Actual Values", "DirRec Forecast", "Recursive Forecast"), col = c("black","red","orange"), lty=1, inset = .05)
+```
+
+#Part 3
+Calculate the MSE for 1990 - which of the two approaches take larger computation time and why?
+```{r}
+c("MSE.recursive" = sum((beerarima.recursive.forecast - test)^2)/length(test),
+  "MSE.dir.rec" =sum((beerarima.DirRec.forecast - test)^2)/length(test))
+```
+
+```{r}
+c("time.recursive" = as.numeric(TimeSpent_1[3]),
+  "time.dir.rec" = as.numeric(TimeSpent_2[3]))
+```
+The direct recursive takes a significant more amount of time to do, which makes logical sense because it is making more models versus the single model created in the recursive approach, but direct recursive did provide for a slightly lower MSE.
